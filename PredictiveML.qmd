@@ -1,0 +1,390 @@
+---
+title: "Predictive Analytics Kaggle"
+format: html
+editor: visual
+---
+
+```{https://www.kaggle.com/competitions/usedcars2023}
+{r}
+#packages
+library(mice)
+library(dplyr)
+library(caret)
+library(forcats)
+library(ggplot2)
+library(stringr)
+library(lubridate)
+library(vtreat)
+library(mice)
+```
+
+```{r}
+#impute
+carsRF = mice::complete(mice(car,method = 'rf',seed = 617,rfPackage='randomForest'))
+ScoringDataRF = mice::complete(mice(ScoringData,method = 'rf',seed = 617,rfPackage='randomForest')) 
+```
+
+```{r}
+#all feature engineering car dataset
+car6 <- carRF
+
+car6[,'month'] <- month(ymd(car6$listed_date),label= T)
+car6 <- car6 %>%
+  select(-listed_date)
+
+car6$is_new[car6$is_new=='False'] = 0
+car6$is_new[car6$is_new=='True'] = 1
+
+
+#isCab (encode)
+car6$isCab[car6$isCab == ""] = 'Not shared'
+#fleet (encode)
+car6$fleet[car6$fleet == ""] = 'Not shared'
+
+#salvage(encode)
+car6$salvage[car6$salvage == ""] = 'Not shared'
+
+#frame dmg (encode)
+car6$frame_damaged[car6$frame_damaged == ""] = 'Not shared'
+
+#has accident(encode)
+car6$has_accidents[car6$has_accidents == ""] = 'Not shared'
+
+#encode franchise make
+car6$franchise_make[car6$franchise_make==""] = 'Not applicable'
+#transmission encode
+car6$transmission[car6$transmission == ""] = 'Unknown'
+
+car6$fleet = as.factor(car6$fleet)
+car6$salvage = as.factor(car6$salvage)
+car6$frame_damaged =as.factor(car6$frame_damaged)
+car6$has_accidents = as.factor(car6$has_accidents)
+car6$is_cpo = as.factor(car6$is_cpo)
+car6$transmission = as.factor(car6$transmission)
+
+
+car6$wheel_system = as.factor(car6$wheel_system)
+car6$body_type = as.factor(car6$body_type) 
+car6$make_name = as.factor(car6$make_name) 
+car6$fuel_type = as.factor(car6$fuel_type)
+car6$listing_color = as.factor(car6$listing_color)
+#car6$wheel_system_display = as.factor(car6$wheel_system_display) 
+#car6$model_name = as.factor(car6$model_name)
+
+car6$month = as.factor(car6$month)
+
+
+#car6$transmission_display = as.factor(car6$transmission_display)
+car6 <- car6 %>%
+  mutate(fuel_type = fct_lump(fuel_type, prop= 0.1)) %>%
+  mutate(month = fct_lump(month, prop = 0.1)) 
+
+
+#torque calculation
+car6$torque <- as.numeric(sub(" lb-ft.*", "", car6$torque))
+car6$torque[is.na(car6$torque)== T] = 259
+
+
+car6$seller_rating<-round(car6$seller_rating)
+
+
+car6$transmission[is.na(car6$transmission) == T] = "A"
+names(which.max(table(car6$transmission)))
+names(which.max(table(car6$transmission_display)))
+
+
+
+car6 <- car6 %>%
+  mutate(exterior_color = case_when(
+    str_detect(tolower(exterior_color), "white") ~ "white",
+    str_detect(tolower(exterior_color), "black") ~ "black",
+    str_detect(tolower(exterior_color), "gray") ~ "gray",
+    str_detect(tolower(exterior_color), "blue") ~ "blue",
+    str_detect((exterior_color), "BLU") ~ "blue",
+    str_detect(tolower(exterior_color), "grey") ~ "gray",
+    str_detect((exterior_color), "WHT") ~ "white",
+    str_detect(tolower(exterior_color), "BLAC") ~ "black",
+    str_detect(tolower(exterior_color), "noir") ~ "black",
+    TRUE ~ as.character('other')
+  ))
+
+
+
+
+car6 <- car6 %>%
+  mutate(interior_color = case_when(
+    str_detect(tolower(interior_color), "white") ~ "white",
+    str_detect(tolower(interior_color), "blue") ~ "blue",
+    str_detect(tolower(interior_color), "silver") ~ "silver",
+    str_detect(tolower(interior_color), "black") ~ "black",
+    str_detect(tolower(interior_color), "gray") ~ "gray",
+    str_detect((interior_color), "Black") ~ "black",
+    TRUE ~ as.character('other')
+  ))
+
+
+
+#listed date extraction
+
+
+car6$interior_color = as.factor(car6$interior_color)
+car6$exterior_color = as.factor(car6$exterior_color)
+
+
+#major_options
+options_list <- c('Bluetooth', 'Backup Camera',  'CarPlay', 'Sunroof/Moonroof', 'Navigation System', 'Alloy Wheels', 'Adaptive Cruise Control', 'Remote Start','Adaptive Suspension','Blindspot Monitoring','Driver Assistance Package')
+
+data <- data.frame(
+  major_options = c(
+    carRF$major_options
+  )
+)
+
+
+result_df3 <- data.frame(matrix(ncol = length(options_list) + 1, nrow = nrow(data)))
+colnames(result_df3) <- c("data", options_list)
+
+# Fill in 'Yes' or 'No' based on options from major_options-
+for (i in seq_along(data$major_options)) {
+  result_df3[i, "data"] <- data$major_options[i]
+  for (option in options_list) {
+    result_df3[i, option] <- ifelse(grepl(option, data$major_options[i]), "Yes", "No")
+  }
+}
+colnames(result_df3)[colnames(result_df3) == 'data'] <- 'major_options'
+
+
+car6[,c(47:59)] <-result_df[,c(1:12)]
+
+car6$interaction <- car6$horsepower*car6$engine_displacement
+car6$age <- abs(car6$year-2023)
+
+proc = preProcess(car6[,c('interaction','mileage','daysonmarket','torque')],method = 'BoxCox')
+proc$bc # lambda value to be used in BoxCox transformation
+car6 <- predict(proc, newdata = car6)
+car6$avgMileage <- (car6$city_fuel_economy+car6$highway_fuel_economy)/2
+car6$engine_type = as.factor(car6$engine_type)
+
+car6[,'prices'] <- car6[,'price'] 
+car6 <- car6 %>%
+  select(-price)
+```
+
+You can add options to executable code like this
+
+```{r}
+#feature engineering scoring
+sd6<-ScoringDataRF
+
+sd6[,'month'] <- month(ymd(sd6$listed_date),label= T)
+sd6 <- sd6 %>%
+  select(-listed_date)
+
+sd6$is_new[sd6$is_new=='False'] = 0
+sd6$is_new[sd6$is_new=='True'] = 1
+
+
+#isCab (encode)
+sd6$isCab[sd6$isCab == ""] = 'Not shared'
+#fleet (encode)
+sd6$fleet[sd6$fleet == ""] = 'Not shared'
+
+#salvage(encode)
+sd6$salvage[sd6$salvage == ""] = 'Not shared'
+
+#frame dmg (encode)
+sd6$frame_damaged[sd6$frame_damaged == ""] = 'Not shared'
+
+#has accident(encode)
+sd6$has_accidents[sd6$has_accidents == ""] = 'Not shared'
+
+#encode franchise make
+sd6$franchise_make[sd6$franchise_make==""] = 'Not applicable'
+#transmission encode
+sd6$transmission[sd6$transmission == ""] = 'Unknown'
+
+sd6$fleet = as.factor(sd6$fleet)
+sd6$salvage = as.factor(sd6$salvage)
+sd6$frame_damaged =as.factor(sd6$frame_damaged)
+sd6$has_accidents = as.factor(sd6$has_accidents)
+sd6$is_cpo = as.factor(sd6$is_cpo)
+sd6$transmission = as.factor(sd6$transmission)
+sd6$wheel_system = as.factor(sd6$wheel_system)
+sd6$body_type = as.factor(sd6$body_type) 
+sd6$make_name = as.factor(sd6$make_name) 
+sd6$fuel_type = as.factor(sd6$fuel_type)
+sd6$listing_color = as.factor(sd6$listing_color)
+#sd6$wheel_system_display = as.factor(sd6$wheel_system_display) 
+#sd6$model_name = as.factor(sd6$model_name)
+sd6$month = as.factor(sd6$month)
+
+
+#sd6$transmission_display = as.factor(sd6$transmission_display)
+sd6 <- sd6 %>%
+  mutate(fuel_type = fct_lump(fuel_type, prop= 0.1)) %>%
+  mutate(month = fct_lump(month, prop = 0.1)) %>%
+mutate(body_type = fct_lump(body_type, prop = 0.1)) 
+  mutate(make_name = fct_lump(make_name, prop= 0.1)) %>%
+  mutate(listing_color = fct_lump(listing_color, prop = 0.1)) %>%
+  mutate(wheel_system= fct_lump(wheel_system, prop = 0.1)) 
+
+
+#torque calculation
+sd6$torque <- as.numeric(sub(" lb-ft.*", "", sd6$torque))
+sd6$torque[is.na(sd6$torque)== T] = mean(sd6$torque, na.rm = T)
+
+#isnew(1/0)
+
+sd6$seller_rating<-round(sd6$seller_rating)
+#torque impute
+
+
+#transmission display empty string
+
+
+#removed interior,exterior colour for trying, and torque needs rpm again in the new model
+
+sd6$transmission[is.na(sd6$transmission) == T] = "A"
+#names(which.max(table(sd6$transmission)))
+#names(which.max(table(sd6$transmission_display)))
+
+
+
+sd6 <- sd6 %>%
+  mutate(exterior_color = case_when(
+    str_detect(tolower(exterior_color), "white") ~ "white",
+    str_detect(tolower(exterior_color), "black") ~ "black",
+    str_detect(tolower(exterior_color), "gray") ~ "gray",
+    str_detect(tolower(exterior_color), "blue") ~ "blue",
+    str_detect((exterior_color), "BLU") ~ "blue",
+    str_detect(tolower(exterior_color), "grey") ~ "gray",
+    str_detect((exterior_color), "WHT") ~ "white",
+    str_detect(tolower(exterior_color), "BLAC") ~ "black",
+    str_detect(tolower(exterior_color), "noir") ~ "black",
+    TRUE ~ as.character('other')
+  ))
+
+
+
+
+sd6 <- sd6 %>%
+  mutate(interior_color = case_when(
+    str_detect(tolower(interior_color), "white") ~ "white",
+    str_detect(tolower(interior_color), "blue") ~ "blue",
+    str_detect(tolower(interior_color), "silver") ~ "silver",
+    str_detect(tolower(interior_color), "black") ~ "black",
+    str_detect(tolower(interior_color), "gray") ~ "gray",
+    str_detect((interior_color), "Black") ~ "black",
+    TRUE ~ as.character('other')
+  ))
+
+
+
+sd6$interior_color = as.factor(sd6$interior_color)
+sd6$exterior_color = as.factor(sd6$exterior_color)
+
+
+#major_options
+options_list <- c('Bluetooth', 'Backup Camera',  'CarPlay', 'Sunroof/Moonroof', 'Navigation System', 'Alloy Wheels', 'Adaptive Cruise Control', 'Remote Start','Adaptive Suspension','Blindspot Monitoring','Driver Assistance Package')
+
+data <- data.frame(
+  major_options = c(
+    sd6$major_options
+  )
+)
+
+
+result_df6 <- data.frame(matrix(ncol = length(options_list) + 1, nrow = nrow(data)))
+colnames(result_df6) <- c("data", options_list)
+
+# Fill in 'Yes' or 'No' based on options from major_options-
+for (i in seq_along(data$major_options)) {
+  result_df6[i, "data"] <- data$major_options[i]
+  for (option in options_list) {
+    result_df6[i, option] <- ifelse(grepl(option, data$major_options[i]), "Yes", "No")
+  }
+}
+colnames(result_df6)[colnames(result_df6) == 'data'] <- 'major_options'
+
+
+sd6[,c(46:58)] <-result_df6[,c(1:12)]
+
+
+library(caret)
+sd6$interaction <- sd6$horsepower*sd6$engine_displacement
+sd6$age <- abs(sd6$year-2023)
+library(e1071)
+proc2 = preProcess(sd6[,c('interaction','mileage','daysonmarket','torque')],method = 'BoxCox')
+proc2$bc # lambda value to be used in BoxCox transformation
+
+sd6 <- predict(proc2, newdata = sd6)
+
+
+sd6$avgMileage <- (sd6$city_fuel_economy+sd6$highway_fuel_economy)/2
+sd6$engine_type = as.factor(sd6$engine_type)
+
+```
+
+```{r}
+#Final dataset
+car6 <- car6 %>%
+  select(-c(make_name,model_name,description,major_options,trim_name,power,
+            front_legroom_inches,data.1,data,is_cpo,is_new,has_accidents,`Blindspot Monitoring`,
+            wheelbase_inches,transmission_display,wheel_system_display,isCab))
+sd6 <- sd6 %>%
+  select(-c(make_name,model_name,description,major_options,trim_name,power,
+            front_legroom_inches,is_cpo,is_new,has_accidents,`Blindspot Monitoring`,
+            wheelbase_inches,transmission_display,wheel_system_display,isCab,major_options.2,major_options.1))
+
+
+car6 <- car6 %>%
+  select(-c(avgMileage,age,length_inches,height_inches,width_inches,owner_count,
+            maximum_seating))
+sd6 <- sd6%>%
+  select(-c(avgMileage,age,length_inches,height_inches,width_inches,owner_count,
+            maximum_seating))
+
+```
+
+```{r}
+#XgBoost
+set.seed(1031)
+trt7 = designTreatmentsZ(dframe = car6,
+                         varlist = names(car6)[1:37])
+newvars4 = trt$scoreFrame[trt4$scoreFrame$code%in% c('clean','lev'),'varName']
+
+train_input5 = prepare(treatmentplan = trt7, 
+                       dframe = car6,
+                       varRestriction = newvars4)
+sd4_inp5 = prepare(treatmentplan = trt7, 
+                   dframe = sd6,
+                   varRestriction = newvars4)
+
+
+
+tune_nrounds5 = xgb.cv(data=as.matrix(train_input5), 
+                        label = car6$prices,
+                        nrounds=700,
+                        nfold = 5,
+                        verbose = 1,nthread = 8L, early_stopping_rounds = 100)
+
+which.min(tune_nrounds5$evaluation_log$test_rmse_mean)
+
+
+xgboost50= xgboost(data=as.matrix(train_input5), 
+                   label = car6$prices,
+                   nrounds=493,
+                   verbose = 0)
+
+```
+
+```{r}
+#predict-
+pred50 = predict(xgboost50, 
+                 newdata=as.matrix(train_input5))
+rmse_xgboost = sqrt(mean((pred50 - car4$prices)^2)); rmse_xgboost
+
+```
+
+```         
+```
